@@ -2,13 +2,19 @@ package org.javasocketclient;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Scanner;
 
-public class Client  {
-    Socket client;
-    PrintWriter messageSender;
-    BufferedReader messageReader;
+public class Client {
+    private Socket client;
+    private PrintWriter messageSender;
+    private BufferedReader messageReader;
 
-    InputStream dataComingIn;
+    private InputStream dataComingIn;
+    private boolean running;
+
+    private Thread receiverThread;
+    private Thread senderThread;
+
 
     public Client(String url, int Port) throws IOException {
         client = new Socket(url, Port);
@@ -17,27 +23,72 @@ public class Client  {
         messageSender = new PrintWriter(client.getOutputStream(), true);
         messageReader = new BufferedReader(new InputStreamReader(dataComingIn));
 
-        sendMessage("just a test message sending ");
+        receiverThread = new Thread(this::messageReceiver);
+        senderThread = new Thread(() -> {
+            try {
+                messageSendingService();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
 
-        String receivedMessage;
-        while ((receivedMessage = messageReader.readLine()) != null) {
-            System.out.println("Received: " + receivedMessage);
-        }
+        receiverThread.start();
+        senderThread.start();
 
-    }
-
-    public void sendMessage(String message) throws IOException {
-        if(message.equals("exit")) {
+        try {
+            receiverThread.join();
+            senderThread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } finally {
             closeConnection();
-            return;
         }
-        messageSender.println("just a test message ");
+
     }
 
-    private void closeConnection() throws IOException {
-        messageReader.close();
-        messageSender.close();
-        client.close();
+    public void messageSendingService() throws IOException {
+        Scanner readConsole = new Scanner(System.in);
+        System.out.println("To Stop Service Write 'exit' in console");
+
+        while(running) {
+            if(readConsole.nextLine().equals("exit")) {
+                closeConnection();
+                running = false;
+                readConsole.close();
+                return;
+            }
+
+            sendMessage(readConsole.nextLine());
+        }
+    }
+
+    private void sendMessage(String message) throws IOException {
+        messageSender.println(message);
+        messageSender.flush();
+    }
+
+    public void messageReceiver() {
+        running = true;
+
+        try {
+            String receivedMessage;
+            while (running && (receivedMessage = messageReader.readLine()) != null) {
+                System.out.println("Received: " + receivedMessage);
+            }
+        } catch (IOException e) {
+            e.getStackTrace();
+        }
+    }
+
+    private void closeConnection() {
+        try {
+            if(messageReader != null) messageReader.close();
+            if(messageSender != null) messageSender.close();
+            if(client != null) client.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
 
